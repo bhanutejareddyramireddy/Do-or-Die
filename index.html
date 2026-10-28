@@ -1,0 +1,754 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no, maximum-scale=1.0">
+  <title>DO OR DIE — 3D Escape Adventure</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;600;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="css/style.css?v=v14_circuit_ui_overhaul">
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+</head>
+<body>
+  <!-- 3D Canvas Mount Point -->
+  <div id="game-container"></div>
+
+  <!-- Screen Edge Danger Vignette (Pulsates red when time < 15s) -->
+  <div id="vignette-overlay" class="vignette-overlay"></div>
+
+  <!-- Pickup Toast Notification -->
+  <div id="pickup-toast" class="toast-card">
+    <span id="toast-text">+ ACQUIRED: Storage Master Key</span>
+  </div>
+
+  <!-- In-game HUD -->
+  <div id="hud">
+    <div class="hud-top">
+      <div class="game-logo">DO OR DIE</div>
+      <div class="hud-center">
+        <div class="hud-badge"><span class="badge-label">LEVEL</span> <span class="badge-val">1 : HOSPITAL</span></div>
+        <div class="hud-badge"><span class="badge-label">FLOOR</span> <span class="badge-val">1 (TRAUMA)</span></div>
+        <div class="hud-badge timer-badge" id="hud-timer">
+          <span class="badge-label">TIME</span>
+          <span class="badge-val" id="timer-display">02:20</span>
+        </div>
+        <div class="hud-badge"><span class="badge-label">EMERGENCY</span> <span class="badge-val alert">FIRE / SMOKE</span></div>
+      </div>
+      <div class="hud-status">
+        <span class="status-indicator"></span>
+        <span class="status-text" id="hud-phase-status">POWER OFFLINE • LOCKDOWN</span>
+      </div>
+    </div>
+
+    <!-- Active Objective Display -->
+    <div id="hud-objective" class="objective-card">
+      <span class="obj-label">OBJECTIVE:</span>
+      <span id="objective-text" class="obj-text"><span style="color: #38bdf8; font-weight: 700;">TRAUMA SUITE 301:</span> Search room for security credentials &bull; Restabilize Auxiliary Power</span>
+    </div>
+
+    <!-- Toxic Gas Hazard HUD (Active on Floor 2) -->
+    <div id="hud-toxic-hazard" class="toxic-card" style="display: none;">
+      <div class="toxic-header">
+        <span class="toxic-icon">☣</span>
+        <span class="toxic-label">TOXIC EXPOSURE</span>
+        <span id="toxic-level-text" class="toxic-val">0%</span>
+      </div>
+      <div class="toxic-track">
+        <div id="toxic-fill" class="toxic-fill" style="width: 0%;"></div>
+      </div>
+    </div>
+    
+    <!-- Reticle / Crosshair -->
+    <div class="crosshair" id="crosshair"></div>
+
+    <!-- Interaction Prompt (Appears when aiming at interactive objects) -->
+    <div id="interaction-prompt">
+      <span class="prompt-key" id="prompt-key">E</span>
+      <span class="prompt-text" id="prompt-text">Interact</span>
+    </div>
+
+    <!-- Bottom HUD Layout: Stamina Bar + Controls Hint -->
+    <div class="hud-bottom">
+      <div id="stamina-container" class="stamina-card">
+        <div class="stamina-header">
+          <span class="stamina-label">⚡ STAMINA</span>
+          <span id="stamina-val" class="stamina-val">100%</span>
+        </div>
+        <div class="stamina-track">
+          <div id="stamina-bar-fill" class="stamina-fill normal" style="width: 100%;"></div>
+        </div>
+      </div>
+      <div class="controls-hint">
+        <span><kbd>W</kbd><kbd>A</kbd><kbd>S</kbd><kbd>D</kbd> Walk</span>
+        <span><kbd>&larr;</kbd><kbd>&rarr;</kbd> Turn</span>
+        <span><kbd>SHIFT</kbd> Sprint</span>
+        <span><kbd>TAB</kbd> / <kbd>I</kbd> Satchel &amp; Map</span>
+        <span id="hud-flashlight-hint"><kbd>F</kbd> Light <span style="color: #38bdf8; font-weight: 700;">[ON]</span></span>
+        <span><kbd>E</kbd> Interact</span>
+        <span><kbd>ESC</kbd> Pause</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Mobile Touch Controls Overlay -->
+  <div id="mobile-controls">
+    <div id="joystick-zone">
+      <div id="joystick-base">
+        <div id="joystick-knob"></div>
+      </div>
+      <button id="invert-joy-btn" class="joy-invert-btn" title="Toggle Invert Y-Axis">INV Y</button>
+    </div>
+    <div id="touch-look-zone"></div>
+    <div class="mobile-action-bar">
+      <button id="mobile-interact-btn" class="mobile-btn">
+        <span>TAP TO INTERACT</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Survivor Satchel & Architectural Blueprint Modal (TAB / I key) -->
+  <div id="inventory-modal" class="modal-backdrop">
+    <div class="inventory-card">
+      <div class="modal-header">
+        <div class="inv-header-title">
+          <span class="inv-header-icon">🎒</span>
+          <h2>SURVIVOR SATCHEL &amp; MAP</h2>
+        </div>
+        <button id="inventory-close-btn" class="modal-close">&times;</button>
+      </div>
+
+      <!-- Navigation Tabs: Items vs Floor Blueprint -->
+      <div class="inv-nav-tabs">
+        <button id="tab-btn-items" class="inv-tab-btn active">
+          <span>🎒 SATCHEL ITEMS</span>
+        </button>
+        <button id="tab-btn-map" class="inv-tab-btn">
+          <span>🗺️ HOSPITAL BLUEPRINT</span>
+        </button>
+      </div>
+
+      <p class="inventory-subtitle" id="inv-tab-subtitle">Collected keys, keycards &amp; survival equipment &bull; Press <kbd>TAB</kbd> or <kbd>I</kbd> to close</p>
+
+      <!-- View 1: Inventory Items Grid -->
+      <div id="inventory-modal-slots" class="inventory-grid">
+        <!-- Dynamic items rendered by inventory.js -->
+      </div>
+
+      <!-- View 2: Architectural Vector Blueprint Map -->
+      <div id="inventory-map-view" class="inventory-map-container" style="display: none;">
+        <!-- Dynamic SVG floor schematic rendered by inventory.js -->
+      </div>
+    </div>
+  </div>
+
+  <!-- Interactive Document / Terminal / Object Modal -->
+  <div id="interaction-modal" class="modal-backdrop">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h2 id="modal-title">EXAMINE ITEM</h2>
+        <button id="modal-close-btn" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body" id="modal-body">
+        <!-- Dynamic content inserted by InteractionSystem -->
+      </div>
+      <div class="modal-footer">
+        <span class="modal-hint">Press <kbd>E</kbd> or <kbd>ESC</kbd> to return</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Digital Keypad / Code Puzzle Modal -->
+  <div id="keypad-puzzle-modal" class="modal-backdrop">
+    <div class="keypad-card">
+      <div class="keypad-header">
+        <h2>TERMINAL SECURITY KEYPAD</h2>
+        <button id="keypad-close-btn" class="modal-close">&times;</button>
+      </div>
+      
+      <div class="keypad-screen">
+        <div id="keypad-status" class="keypad-status normal">ENTER 3-DIGIT OVERRIDE CODE</div>
+        <div id="keypad-display" class="keypad-display">_ _ _</div>
+      </div>
+
+      <div id="keypad-keys" class="keypad-grid">
+        <button class="keypad-btn" data-val="1">1</button>
+        <button class="keypad-btn" data-val="2">2</button>
+        <button class="keypad-btn" data-val="3">3</button>
+        <button class="keypad-btn" data-val="4">4</button>
+        <button class="keypad-btn" data-val="5">5</button>
+        <button class="keypad-btn" data-val="6">6</button>
+        <button class="keypad-btn" data-val="7">7</button>
+        <button class="keypad-btn" data-val="8">8</button>
+        <button class="keypad-btn" data-val="9">9</button>
+        <button class="keypad-btn clear" data-val="clear">CLR</button>
+        <button class="keypad-btn" data-val="0">0</button>
+        <button class="keypad-btn enter" data-val="enter">ENT</button>
+      </div>
+
+      <div class="keypad-footer">
+        <span class="modal-hint">Use Keyboard numbers or Click &bull; Press <kbd>ESC</kbd> to exit</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- Reactor Frequency & Voltage Matrix Puzzle Modal (Floor 3 Engineering Core) -->
+  <div id="reactor-puzzle-modal" class="modal-backdrop">
+    <div class="tactical-puzzle-card">
+      <div class="hazard-stripe"></div>
+      <div class="tactical-puzzle-header">
+        <div class="puzzle-title-group">
+          <span class="puzzle-sub-tag">AUXILIARY POWER GRID &bull; CORE 303</span>
+          <h2>PLASMA REACTOR HARMONIC MATRIX</h2>
+        </div>
+        <button id="reactor-close-btn" class="modal-close">&times;</button>
+      </div>
+
+      <div class="reactor-status-banner">
+        <div class="reactor-gauge-box">
+          <span class="gauge-label">GRID OUTPUT</span>
+          <span id="reactor-output-val" class="gauge-value">0%</span>
+        </div>
+        <div class="reactor-gauge-box">
+          <span class="gauge-label">TARGET OUTPUT</span>
+          <span class="gauge-value target">100% (120 kV)</span>
+        </div>
+        <div class="reactor-gauge-box">
+          <span class="gauge-label">CORE HARMONICS</span>
+          <span id="reactor-status-text" class="gauge-value alert">UNSTABLE</span>
+        </div>
+      </div>
+
+      <div class="reactor-instructions">
+        Balance the 4 Magnetic Stabilizer Coils to achieve exactly <strong>100% (120 kV)</strong> output without overloading any capacitor.
+      </div>
+
+      <div class="reactor-coils-grid" id="reactor-coils-container">
+        <!-- 4 Coils dynamically rendered -->
+      </div>
+
+      <div class="tactical-puzzle-footer">
+        <button id="reactor-reset-btn" class="btn-secondary">↺ RESET COILS</button>
+        <button id="reactor-engage-btn" class="btn-primary">⚡ ENGAGE POWER GRID</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Gas Pressure Equalizer Puzzle Modal (Floor 2 Utility 203) -->
+  <div id="pressure-puzzle-modal" class="modal-backdrop">
+    <div class="tactical-puzzle-card">
+      <div class="hazard-stripe hazard-amber"></div>
+      <div class="tactical-puzzle-header">
+        <div class="puzzle-title-group">
+          <span class="puzzle-sub-tag">DECONTAMINATION LINE &bull; UTILITY 203</span>
+          <h2>TOXIC PRESSURE EQUALIZER CONSOLE</h2>
+        </div>
+        <button id="pressure-close-btn" class="modal-close">&times;</button>
+      </div>
+
+      <div class="pressure-status-banner">
+        <div class="pressure-gauge-card">
+          <span class="gauge-label">CHAMBER PRESSURE</span>
+          <span id="pressure-current-val" class="gauge-value alert">78 PSI</span>
+          <div class="pressure-bar-track">
+            <div id="pressure-bar-fill" class="pressure-bar-fill" style="width: 78%;"></div>
+            <div class="safe-zone-marker" style="left: 40%; width: 15%;"></div>
+          </div>
+          <span class="safe-zone-label">SAFE RELIEF ENVELOPE: 42 — 48 PSI</span>
+        </div>
+      </div>
+
+      <div class="valves-control-deck">
+        <div class="valve-unit" data-valve="1">
+          <div class="valve-wheel" id="valve-wheel-1">⚙</div>
+          <div class="valve-info">
+            <span class="valve-name">PRIMARY BLEED VENT</span>
+            <span class="valve-delta">-12 PSI / +6 PSI</span>
+          </div>
+          <div class="valve-buttons">
+            <button class="valve-btn minus" data-valve="1" data-dir="-1">▼ PURGE</button>
+            <button class="valve-btn plus" data-valve="1" data-dir="1">▲ BOOST</button>
+          </div>
+        </div>
+
+        <div class="valve-unit" data-valve="2">
+          <div class="valve-wheel" id="valve-wheel-2">⚙</div>
+          <div class="valve-info">
+            <span class="valve-name">SECONDARY SCRUBBER</span>
+            <span class="valve-delta">-8 PSI / +10 PSI</span>
+          </div>
+          <div class="valve-buttons">
+            <button class="valve-btn minus" data-valve="2" data-dir="-1">▼ PURGE</button>
+            <button class="valve-btn plus" data-valve="2" data-dir="1">▲ BOOST</button>
+          </div>
+        </div>
+
+        <div class="valve-unit" data-valve="3">
+          <div class="valve-wheel" id="valve-wheel-3">⚙</div>
+          <div class="valve-info">
+            <span class="valve-name">BYPASS INERT DILUTION</span>
+            <span class="valve-delta">-5 PSI / +7 PSI</span>
+          </div>
+          <div class="valve-buttons">
+            <button class="valve-btn minus" data-valve="3" data-dir="-1">▼ PURGE</button>
+            <button class="valve-btn plus" data-valve="3" data-dir="1">▲ BOOST</button>
+          </div>
+        </div>
+      </div>
+
+      <div class="tactical-puzzle-footer">
+        <button id="pressure-reset-btn" class="btn-secondary">↺ VENT CYCLE RESET</button>
+        <button id="pressure-flush-btn" class="btn-primary">💨 FLUSH TOXIC GAS</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Bio-Hazard Chemical Synthesizer Puzzle Modal (Floor 2 Bio-Lab 202) -->
+  <div id="chemical-puzzle-modal" class="modal-backdrop">
+    <div class="tactical-puzzle-card">
+      <div class="hazard-stripe hazard-cyan"></div>
+      <div class="tactical-puzzle-header">
+        <div class="puzzle-title-group">
+          <span class="puzzle-sub-tag">BIO-RESEARCH LABORATORY &bull; LAB 202</span>
+          <h2>ANTIDOTE REAGENT SPECTROMETER</h2>
+        </div>
+        <button id="chemical-close-btn" class="modal-close">&times;</button>
+      </div>
+
+      <div class="reagent-riddle-box">
+        <strong>MEDICAL PROTOCOL RIDDLE (FROM ICU LOG #409):</strong>
+        <p>"To synthesize the decontamination catalyst: <strong>Adenine (Green)</strong> must precede <strong>Cytosine (Blue)</strong>; <strong>Thymine (Red)</strong> must be sequenced last; <strong>Guanine (Gold)</strong> must initiate the chain."</p>
+      </div>
+
+      <div class="reagent-slots-container">
+        <div class="reagent-slot" data-slot="0">
+          <span class="slot-num">STEP 1</span>
+          <div class="slot-vial empty" id="vial-slot-0">EMPTY</div>
+        </div>
+        <div class="reagent-slot" data-slot="1">
+          <span class="slot-num">STEP 2</span>
+          <div class="slot-vial empty" id="vial-slot-1">EMPTY</div>
+        </div>
+        <div class="reagent-slot" data-slot="2">
+          <span class="slot-num">STEP 3</span>
+          <div class="slot-vial empty" id="vial-slot-2">EMPTY</div>
+        </div>
+        <div class="reagent-slot" data-slot="3">
+          <span class="slot-num">STEP 4</span>
+          <div class="slot-vial empty" id="vial-slot-3">EMPTY</div>
+        </div>
+      </div>
+
+      <div class="reagents-rack" id="reagents-selector-rack">
+        <button class="reagent-pill-btn gold" data-reagent="G">GUANINE [GOLD]</button>
+        <button class="reagent-pill-btn green" data-reagent="A">ADENINE [GREEN]</button>
+        <button class="reagent-pill-btn blue" data-reagent="C">CYTOSINE [BLUE]</button>
+        <button class="reagent-pill-btn red" data-reagent="T">THYMINE [RED]</button>
+      </div>
+
+      <div class="tactical-puzzle-footer">
+        <button id="chemical-clear-btn" class="btn-secondary">↺ CLEAR RACK</button>
+        <button id="chemical-synthesize-btn" class="btn-primary">🧪 SYNTHESIZE &amp; OVERRIDE</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Hydraulic Blast Gate Color Circuit Bypass (Ground Floor Security Command) -->
+  <div id="circuit-puzzle-modal" class="modal-backdrop">
+    <div class="tactical-puzzle-card circuit-card">
+      <div class="hazard-stripe hazard-amber"></div>
+      <div class="tactical-puzzle-header">
+        <div class="puzzle-title-group">
+          <span class="puzzle-sub-tag">WEST SECURITY COMMAND &bull; EXTRACTION CONSOLE</span>
+          <h2>HYDRAULIC GATE CIRCUIT BYPASS</h2>
+        </div>
+        <button id="circuit-close-btn" class="modal-close">&times;</button>
+      </div>
+
+      <div class="circuit-status-banner">
+        <div class="circuit-status-box">
+          <span class="gauge-label">CIRCUIT BYPASS STATUS</span>
+          <span id="circuit-status-text" class="gauge-value alert">DISCONNECTED (0/4)</span>
+          <div class="circuit-led-pips">
+            <span class="circuit-pip pip-red" id="pip-red" title="Pump A [Red]"></span>
+            <span class="circuit-pip pip-blue" id="pip-blue" title="Lock B [Blue]"></span>
+            <span class="circuit-pip pip-yellow" id="pip-yellow" title="Valve C [Yellow]"></span>
+            <span class="circuit-pip pip-green" id="pip-green" title="Core D [Green]"></span>
+          </div>
+        </div>
+        <div class="circuit-status-box">
+          <span class="gauge-label">COURTYARD BLAST GATES</span>
+          <span id="circuit-gate-text" class="gauge-value alert">LOCKED [FAILSAFE]</span>
+          <span class="circuit-gate-sub">REQUIRES ALL 4 CONDUITS ENERGIZED</span>
+        </div>
+      </div>
+
+      <div class="circuit-instructions">
+        <div class="inst-icon">⚡</div>
+        <div class="inst-text">
+          <strong>HYDRAULIC OVERRIDE PROTOCOL:</strong> Click a <strong>Hydraulic Feed</strong> on the left, then click its matching <strong>Color Terminal Receptor</strong> on the right to link the hydraulic bypass lines.
+        </div>
+      </div>
+
+      <div class="circuit-board">
+        <!-- SVG Canvas for connecting wires -->
+        <svg id="circuit-wires-svg" class="circuit-wires-svg"></svg>
+
+        <!-- Left Column: Source Lines -->
+        <div class="circuit-col left-col">
+          <div class="circuit-col-header">
+            <span class="col-header-tag">SOURCE BUS // 120 PSI</span>
+            <span class="col-header-sub">SELECT HYDRAULIC FEED</span>
+          </div>
+
+          <button class="wire-socket-btn wire-src color-red" data-color="red" id="wire-src-red">
+            <div class="wire-channel-indicator"></div>
+            <div class="wire-icon">🔴</div>
+            <div class="wire-info">
+              <span class="wire-tag">PUMP A &bull; HOIST LINE</span>
+              <span class="wire-label">ALPHA FEED [RED]</span>
+            </div>
+            <span class="wire-conn-indicator" id="conn-src-red">DISCONNECTED</span>
+            <span class="wire-plug-node red"></span>
+          </button>
+
+          <button class="wire-socket-btn wire-src color-blue" data-color="blue" id="wire-src-blue">
+            <div class="wire-channel-indicator"></div>
+            <div class="wire-icon">🔵</div>
+            <div class="wire-info">
+              <span class="wire-tag">LOCK B &bull; MAG-CLAMPS</span>
+              <span class="wire-label">BETA FEED [BLUE]</span>
+            </div>
+            <span class="wire-conn-indicator" id="conn-src-blue">DISCONNECTED</span>
+            <span class="wire-plug-node blue"></span>
+          </button>
+
+          <button class="wire-socket-btn wire-src color-yellow" data-color="yellow" id="wire-src-yellow">
+            <div class="wire-channel-indicator"></div>
+            <div class="wire-icon">🟡</div>
+            <div class="wire-info">
+              <span class="wire-tag">VALVE C &bull; PRESSURE LINE</span>
+              <span class="wire-label">GAMMA FEED [YELLOW]</span>
+            </div>
+            <span class="wire-conn-indicator" id="conn-src-yellow">DISCONNECTED</span>
+            <span class="wire-plug-node yellow"></span>
+          </button>
+
+          <button class="wire-socket-btn wire-src color-green" data-color="green" id="wire-src-green">
+            <div class="wire-channel-indicator"></div>
+            <div class="wire-icon">🟢</div>
+            <div class="wire-info">
+              <span class="wire-tag">CORE D &bull; AUX BYPASS</span>
+              <span class="wire-label">DELTA FEED [GREEN]</span>
+            </div>
+            <span class="wire-conn-indicator" id="conn-src-green">DISCONNECTED</span>
+            <span class="wire-plug-node green"></span>
+          </button>
+        </div>
+
+        <!-- Right Column: Target Sockets (Scrambled for Puzzle Challenge) -->
+        <div class="circuit-col right-col">
+          <div class="circuit-col-header text-right">
+            <span class="col-header-tag">TERMINAL BUS // GATE MATRIX</span>
+            <span class="col-header-sub">CONNECT MATCHING PORT</span>
+          </div>
+
+          <button class="wire-socket-btn wire-dst color-blue" data-color="blue" id="wire-dst-blue">
+            <span class="wire-plug-node blue target"></span>
+            <span class="wire-conn-indicator" id="conn-dst-blue">OPEN PORT</span>
+            <div class="wire-info text-right">
+              <span class="wire-tag">TERMINAL 1 &bull; PORT #B</span>
+              <span class="wire-status" id="wire-status-blue">BLUE RECEPTOR</span>
+            </div>
+            <div class="wire-icon">🔵</div>
+            <div class="wire-channel-indicator"></div>
+          </button>
+
+          <button class="wire-socket-btn wire-dst color-red" data-color="red" id="wire-dst-red">
+            <span class="wire-plug-node red target"></span>
+            <span class="wire-conn-indicator" id="conn-dst-red">OPEN PORT</span>
+            <div class="wire-info text-right">
+              <span class="wire-tag">TERMINAL 2 &bull; PORT #A</span>
+              <span class="wire-status" id="wire-status-red">RED RECEPTOR</span>
+            </div>
+            <div class="wire-icon">🔴</div>
+            <div class="wire-channel-indicator"></div>
+          </button>
+
+          <button class="wire-socket-btn wire-dst color-green" data-color="green" id="wire-dst-green">
+            <span class="wire-plug-node green target"></span>
+            <span class="wire-conn-indicator" id="conn-dst-green">OPEN PORT</span>
+            <div class="wire-info text-right">
+              <span class="wire-tag">TERMINAL 3 &bull; PORT #D</span>
+              <span class="wire-status" id="wire-status-green">GREEN RECEPTOR</span>
+            </div>
+            <div class="wire-icon">🟢</div>
+            <div class="wire-channel-indicator"></div>
+          </button>
+
+          <button class="wire-socket-btn wire-dst color-yellow" data-color="yellow" id="wire-dst-yellow">
+            <span class="wire-plug-node yellow target"></span>
+            <span class="wire-conn-indicator" id="conn-dst-yellow">OPEN PORT</span>
+            <div class="wire-info text-right">
+              <span class="wire-tag">TERMINAL 4 &bull; PORT #C</span>
+              <span class="wire-status" id="wire-status-yellow">YELLOW RECEPTOR</span>
+            </div>
+            <div class="wire-icon">🟡</div>
+            <div class="wire-channel-indicator"></div>
+          </button>
+        </div>
+      </div>
+
+      <div class="tactical-puzzle-footer">
+        <button id="circuit-reset-btn" class="btn-secondary">↺ DISENGAGE ALL WIRES</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Floor Complete Transition Modal (Phase 10 & 12 Time Carry-Forward) -->
+  <div id="floor-clear-modal" class="modal-backdrop">
+    <div class="floor-clear-card">
+      <div class="clear-badge">✓ ESCAPE SUCCESSFUL</div>
+      <h1 class="clear-title" id="clear-title">HOSPITAL FLOOR 3 CLEARED</h1>
+      <p class="clear-desc" id="clear-desc">
+        You successfully retrieved the Security Pass, stabilized the Plasma Reactor Matrix, decrypted the Nurse Command blast doors, and reached Emergency Stairwell B!
+      </p>
+
+      <div class="stats-grid">
+        <div class="stat-box">
+          <span class="stat-label">FLOOR</span>
+          <span class="stat-val">3 OF 3</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">TIME LEFT</span>
+          <span id="clear-time-remaining" class="stat-val highlight">00:45</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">BONUS CARRIED</span>
+          <span id="clear-bonus-awarded" class="stat-val success">+45 SEC</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">NEXT FLOOR TIME</span>
+          <span id="clear-next-total-time" class="stat-val highlight">02:15</span>
+        </div>
+      </div>
+
+      <button id="next-floor-btn" class="btn-primary">
+        <span class="btn-glow"></span>
+        <span id="next-floor-btn-text">DESCEND TO FLOOR 2</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- Final Victory / Level 1 Complete Screen (Phase 15 Escape) -->
+  <div id="victory-modal" class="modal-backdrop">
+    <div class="victory-card">
+      <div class="victory-badge">🏆 CHAPTER 1 COMPLETE</div>
+      <h1 class="victory-title">HOSPITAL EVACUATED!</h1>
+      <p class="victory-desc">
+        You survived the deadly hospital descent through Floor 3, Floor 2, and the Ground Floor Triage, breached the courtyard security blast gate, and escaped in the emergency evacuation ambulance!
+      </p>
+
+      <div class="victory-stats-grid">
+        <div class="stat-box">
+          <span class="stat-label">FLOORS ESCAPED</span>
+          <span class="stat-val highlight">3 OF 3</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">TIME REMAINING</span>
+          <span id="victory-time-left" class="stat-val success">01:15</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">SURVIVOR RANK</span>
+          <span id="victory-rank" class="stat-val highlight rank-s">S-RANK</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">STATUS</span>
+          <span class="stat-val success">SURVIVED</span>
+        </div>
+      </div>
+
+      <button id="victory-restart-btn" class="btn-primary victory-btn">
+        <span class="btn-glow"></span>
+        PLAY AGAIN
+      </button>
+    </div>
+  </div>
+
+  <!-- Game Over Screen (Phase 13 Death & Checkpoint System) -->
+  <div id="game-over-modal" class="modal-backdrop">
+    <div class="game-over-card">
+      <div class="hazard-stripe"></div>
+      <div class="game-over-badge">CRITICAL WARNING</div>
+      <h1 class="game-over-title">TIME EXPIRED</h1>
+      <p class="game-over-desc" id="game-over-desc">
+        Floor was overwhelmed by hazard before you reached the staircase.
+      </p>
+
+      <div class="game-over-stats">
+        <div class="stat-box">
+          <span class="stat-label">STATUS</span>
+          <span class="stat-val alert">M.I.A. / FAILED</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">FLOOR</span>
+          <span class="stat-val" id="game-over-floor">HOSPITAL FLOOR 3</span>
+        </div>
+        <div class="stat-box">
+          <span class="stat-label">CHECKPOINT</span>
+          <span class="stat-val highlight" id="game-over-checkpoint">ROOM 301</span>
+        </div>
+      </div>
+
+      <button id="restart-floor-btn" class="btn-primary danger">
+        <span class="btn-glow"></span>
+        <span id="restart-floor-btn-text">RESTART FLOOR 3</span>
+      </button>
+    </div>
+  </div>
+
+  <!-- ========================================================================
+       Cinematic Landing Page / Main Menu
+       ======================================================================== -->
+  <div id="landing-page" class="landing-overlay active">
+    <div class="landing-backdrop-effects">
+      <div class="ambient-glow red-glow"></div>
+      <div class="ambient-glow cyan-glow"></div>
+      <div class="scanlines"></div>
+      <div class="grid-mesh"></div>
+    </div>
+
+    <div class="landing-content">
+      <!-- Top Alert Notification Bar -->
+      <div class="alert-banner">
+        <span class="alert-pulse-dot"></span>
+        <span class="alert-tag">FACILITY ALERT</span>
+        <span class="alert-msg">CODE BLACK &bull; BIO-HAZARD QUARANTINE INITIATED &bull; 3 LEVELS TO EXTRACTION</span>
+      </div>
+
+      <!-- Main Game Title & Briefing -->
+      <div class="landing-hero">
+        <div class="title-wrapper">
+          <h1 class="landing-title" data-text="DO OR DIE">DO OR DIE</h1>
+          <div class="title-sub-badge">3D SURVIVAL ESCAPE &bull; HOSPITAL COMPLEX DESCENT</div>
+        </div>
+        <p class="landing-brief">
+          The hospital is compromised by toxic gas and fire. Infiltrate the facility, solve emergency overrides, and descend through all floors to reach the courtyard evacuation ambulance!
+        </p>
+      </div>
+
+      <!-- Primary Action: Enter Hospital -->
+      <div class="hero-action-container">
+        <button id="start-btn" class="btn-hero-primary" title="Enter Hospital">
+          <span class="btn-hero-glow"></span>
+          <span class="btn-hero-icon">▶</span>
+          <div class="btn-hero-text">
+            <span class="btn-hero-title">ENTER HOSPITAL</span>
+            <span class="btn-hero-desc">Descent: Floor 1 (Trauma) &rarr; Floor 2 (ICU) &rarr; Ground Floor Courtyard</span>
+          </div>
+          <span class="btn-hero-arrow">&rarr;</span>
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Dedicated In-Game Tactical Pause Menu -->
+  <div id="pause-modal" class="modal-backdrop">
+    <div class="pause-card">
+      <div class="pause-scanlines"></div>
+      <div class="hazard-stripe"></div>
+      
+      <div class="pause-header-row">
+        <div class="pause-badge">
+          <span class="pause-pulse-dot"></span>
+          <span>ENVIRONMENT FROZEN</span>
+        </div>
+      </div>
+
+      <h1 class="pause-title">MISSION PAUSED</h1>
+      <p class="pause-desc" id="pause-floor-desc">
+        All countdown timers and environmental hazards are safely suspended.
+      </p>
+
+      <!-- Tactical Mission Telemetry Grid -->
+      <div class="pause-telemetry-grid">
+        <div class="pause-tele-box">
+          <span class="tele-label">SECTOR</span>
+          <span id="pause-tele-sector" class="tele-val highlight">FLOOR 3 (TRAUMA)</span>
+        </div>
+        <div class="pause-tele-box">
+          <span class="tele-label">REMAINING</span>
+          <span id="pause-tele-time" class="tele-val highlight">02:20</span>
+        </div>
+        <div class="pause-tele-box">
+          <span class="tele-label">THREAT</span>
+          <span id="pause-tele-threat" class="tele-val alert">ACTIVE LOCKDOWN</span>
+        </div>
+        <div class="pause-tele-box">
+          <span class="tele-label">SATCHEL</span>
+          <span id="pause-tele-items" class="tele-val">0 ITEMS</span>
+        </div>
+      </div>
+
+      <!-- Current Objective Card (No Spoiled Numbers!) -->
+      <div class="pause-directive-card">
+        <div class="pause-directive-header">
+          <span class="pause-directive-icon">🎯</span>
+          <span class="pause-directive-title">ACTIVE DIRECTIVE</span>
+        </div>
+        <div id="pause-directive-text" class="pause-directive-body">
+          Locate Tier-1 Security Pass in Trauma Suite 301 and proceed to Engineering Vault 303.
+        </div>
+      </div>
+
+      <!-- Compact Quick Controls Bar -->
+      <div class="pause-controls-cheatsheet">
+        <div class="cheatsheet-grid">
+          <div class="cheat-item"><kbd>WASD</kbd> Move</div>
+          <div class="cheat-item"><kbd>SHIFT</kbd> Sprint</div>
+          <div class="cheat-item"><kbd>E</kbd> Interact</div>
+          <div class="cheat-item"><kbd>TAB</kbd> Satchel</div>
+          <div class="cheat-item"><kbd>ESC</kbd> Resume</div>
+        </div>
+      </div>
+
+      <!-- Pause Action Buttons -->
+      <div class="pause-actions-stack">
+        <button id="pause-resume-btn" class="btn-primary resume-btn">
+          <span class="btn-glow"></span>
+          <span class="resume-icon">▶</span>
+          <span>RESUME SURVIVAL (ESC)</span>
+        </button>
+        <div class="pause-secondary-row">
+          <button id="pause-restart-btn" class="btn-secondary">
+            ↻ RESTART CURRENT FLOOR
+          </button>
+          <button id="pause-audio-btn" class="btn-secondary">
+            🔊 SOUND: ON
+          </button>
+        </div>
+        <button id="pause-menu-btn" class="btn-secondary danger-subtle">
+          ⌂ MAIN MENU &bull; SELECT FLOOR
+        </button>
+      </div>
+
+      <div class="pause-hint">
+        Click Resume or press <kbd>ESC</kbd> or <kbd>P</kbd> to return to action immediately.
+      </div>
+    </div>
+  </div>
+
+  <!-- Legacy Blocker compatibility placeholder (Hidden) -->
+  <div id="blocker" style="display: none; visibility: hidden; pointer-events: none;"></div>
+
+
+  <script type="module" src="js/main.js?v=v14_circuit_ui_overhaul"></script>
+</body>
+</html>

@@ -1,0 +1,22 @@
+{
+  "name": "do-or-die",
+  "version": "1.0.0",
+  "description": "DO OR DIE — 3D Escape Adventure",
+  "main": "index.html",
+  "scripts": {
+    "dev": "npx serve -l 3000 .",
+    "start": "npx serve -l 3000 .",
+    "serve": "npx serve -l 3000 ."
+  },
+  "keywords": [
+    "threejs",
+    "escape-game",
+    "webgl",
+    "3d"
+  ],
+  "author": "",
+  "license": "ISC",
+  "dependencies": {
+    "serve": "^14.2.4"
+  }
+}
